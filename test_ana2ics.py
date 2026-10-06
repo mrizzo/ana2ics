@@ -129,6 +129,21 @@ class TripTest(unittest.TestCase):
         self.assertIn("DAY 12 L", ana.describe(self.legs["NH 855 HND-CGK · stay CGK"]))
 
 
+class AllDayCodesTest(unittest.TestCase):
+    def test_other_all_day_codes_group_by_code(self):
+        # made-up month: two LO4 days, two days off, one more LO4, the rest off
+        codes = ["LO4", "LO4", "OFF1", "OFF3", "LO4"] + ["OFF1"] * 23
+        rows = [{"date": f"02/{d:02d}", "job": c, "dep_airport": "OSA"} for d, c in enumerate(codes, 1)]
+        (_, _), evs, problems = ana.convert({"month": "2025/02", "rows": rows})
+        self.assertEqual(problems, [])
+        self.assertEqual([(e["summary"], e["start"].day, (e["end"] - e["start"]).days) for e in evs], [
+            ("LO4 (OSA)", 1, 2), ("OFF (OSA)", 3, 2), ("LO4 (OSA)", 5, 1), ("OFF (OSA)", 6, 23)])
+        ics = ana.to_ics(evs, 2025, 2)
+        self.assertIn("UID:20250201-lo4@ana2ics", ics)
+        self.assertIn("UID:20250203-off@ana2ics", ics)
+        self.assertEqual(ana.unknown_codes(evs, {}), ["LO4", "OFF1", "OFF3"])
+
+
 class ProblemsTest(unittest.TestCase):
     def problems(self, text):
         return ana.convert(roster(text))[2]
