@@ -5,6 +5,8 @@
 # ///
 """Turn a screenshot of an ANA cabin attendant work schedule into an .ics file.
 
+Broadcast Yourself? Schedule Yourself.
+
 Claude only transcribes the table, column by column, exactly as printed. Everything
 that has to be right every time (dates, time zones, overnight flights, grouping days
 off, the .ics itself) is plain Python, and the month is printed as a table to check
@@ -20,15 +22,16 @@ and times, legs run forward in time and last between 20 minutes and 14 hours.
 Problems stop the run (--force writes anyway).
 
 Usage:
-  roster-ics.py SCREENSHOT.png [-o OUT.ics]     # transcribe with Claude, then convert
-  roster-ics.py --from-json SCREENSHOT.json     # convert a saved transcription again
+  ana2ics.py SCREENSHOT.png [-o OUT.ics]     # transcribe with Claude, then convert
+  ana2ics.py SCREENSHOT.png -o - | pbcopy    # the .ics on stdout (the table goes to stderr)
+  ana2ics.py --from-json SCREENSHOT.json     # convert a saved transcription again
 
 The transcription is saved next to the screenshot as .json, so re-running the
 conversion costs nothing. The API key comes from ANTHROPIC_API_KEY or
-~/.config/roster-ics/api_key.
+~/.config/ana2ics/api_key.
 
-Importing replaces nothing: delete the month's old events first. The events carry
-stable UIDs, so importing the same month twice updates rather than duplicates.
+Import each month once. Importing adds and never replaces, so a month imported twice
+(or on top of events made some other way) shows up twice.
 """
 import argparse
 import base64
@@ -43,10 +46,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 JST = ZoneInfo("Asia/Tokyo")
-API_KEY_FILE = Path("~/.config/roster-ics/api_key").expanduser()
+API_KEY_FILE = Path("~/.config/ana2ics/api_key").expanduser()
 MODEL = "claude-opus-5-5"
 
 # Airports whose "L" (local) times aren't Japan time. Japanese airports need no entry.
+# "L" is one letter, easy to miss. Miss it and the Shanghai leg gets an hour shorter:
+# great for the airline, bad for physics, and a calendar that says she's home early.
 LOCAL_TZ = {
     "PVG": "Asia/Shanghai", "SHA": "Asia/Shanghai", "PEK": "Asia/Shanghai", "PKX": "Asia/Shanghai",
     "CAN": "Asia/Shanghai", "DLC": "Asia/Shanghai", "TAO": "Asia/Shanghai", "SZX": "Asia/Shanghai",
@@ -235,6 +240,7 @@ def events(days, problems):
     out, off_run = [], None
 
     def close_off_run():
+        # Days off: the only events nobody minds being all day.
         nonlocal off_run
         if off_run:
             codes = off_run["codes"]
@@ -275,7 +281,7 @@ def events(days, problems):
                 end = clock(row["end"], day, row["arr_airport"], problems, f"{where} {name}")
                 if not (start and end):
                     continue
-                if prev_end and start < prev_end:  # a later leg that departs after midnight
+                if prev_end and start < prev_end:  # a later leg that departs after midnight (Japanese TV calls it 25:30; calendars call it tomorrow)
                     start += dt.timedelta(days=1)
                     end += dt.timedelta(days=1)
                 if end <= start:
@@ -336,7 +342,10 @@ def ics_text(value):
 
 
 def fold(line):
-    """RFC 5545: lines over 75 octets continue on the next line after a space."""
+    """RFC 5545: lines over 75 octets continue on the next line after a space.
+
+    Octets, not characters: a rule inherited from 1998, when calendars were sent by
+    email and Japanese text broke them in creative ways. It still does if you let it."""
     out, data = [], line.encode()
     while len(data) > 75:
         cut = 75 if not out else 74
@@ -352,7 +361,7 @@ def to_ics(evs, year, month):
     utc = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
-        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//roster-ics//EN", "CALSCALE:GREGORIAN",
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ana2ics//EN", "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH", "X-WR-TIMEZONE:Asia/Tokyo",
     ]
     for ev in evs:
@@ -362,7 +371,7 @@ def to_ics(evs, year, month):
         else:
             when = [f"DTSTART:{utc(ev['start'])}", f"DTEND:{utc(ev['end'])}"]
             key = f"{ev['start'].astimezone(JST):%Y%m%d}-{re.sub(r'[^A-Za-z0-9]+', '-', ev['summary']).strip('-').lower()}"
-        lines += ["BEGIN:VEVENT", f"UID:{key}@roster-ics", f"DTSTAMP:{stamp}", *when,
+        lines += ["BEGIN:VEVENT", f"UID:{key}@ana2ics", f"DTSTAMP:{stamp}", *when,
                   f"SUMMARY:{ics_text(ev['summary'])}"]
         if describe(ev):
             lines.append(f"DESCRIPTION:{ics_text(describe(ev))}")
@@ -400,7 +409,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("screenshot", nargs="?", type=Path)
     parser.add_argument("--from-json", type=Path, help="convert a saved transcription instead")
-    parser.add_argument("-o", "--output", type=Path, help="default: YYYY-MM.ics next to the input")
+    parser.add_argument("-o", "--output", type=Path, help="default: YYYY-MM.ics next to the input; - for stdout")
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--force", action="store_true", help="write the .ics even if checks fail")
     args = parser.parse_args()
@@ -417,15 +426,25 @@ def main():
         print(f"saved the transcription to {source}", file=sys.stderr)
 
     (year, month), evs, problems = convert(roster)
-    print(table(evs))
+    to_stdout = str(args.output) == "-"
+    print(table(evs), file=sys.stderr if to_stdout else sys.stdout)
     if problems:
         print(f"\n{len(problems)} problem(s):", *problems, sep="\n  ", file=sys.stderr)
         if not args.force:
-            print("\nNo .ics written. Fix the transcription (.json) and use --from-json, or --force.", file=sys.stderr)
+            print("\nA team of highly trained monkeys has been dispatched to deal with this situation.\n"
+                  "Meanwhile, no .ics was written: fix the transcription (.json) and re-run with\n"
+                  "--from-json (no API call, no monkeys), or --force.", file=sys.stderr)
             return 1
-    out = args.output or source.with_name(f"{year:04d}-{month:02d}.ics")
-    out.write_text(to_ics(evs, year, month), newline="")
-    print(f"\nwrote {len(evs)} events to {out}. Check them against the screenshot before importing.", file=sys.stderr)
+    if to_stdout:
+        sys.stdout.write(to_ics(evs, year, month))
+        sys.stdout.flush()
+        out = "stdout"
+    else:
+        out = args.output or source.with_name(f"{year:04d}-{month:02d}.ics")
+        out.write_text(to_ics(evs, year, month), newline="")
+    print(f"\nwrote {len(evs)} events to {out}.\n"
+          "Processing done. In 2006 this took 30 minutes. Still, check it against the screenshot\n"
+          "before importing: you are the last line of quality assurance.", file=sys.stderr)
     return 0
 
 

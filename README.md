@@ -1,11 +1,13 @@
-# roster-ics
+# ana2ics
+
+*Schedule Yourself.*
 
 Turns a screenshot of an ANA cabin attendant work schedule (the monthly
 "CABIN ATTENDANT WORK SCHEDULE" page) into an `.ics` file to import into a
 calendar.
 
 ```
-uv run roster-ics.py schedule.png
+uv run ana2ics.py schedule.png
 ```
 
 prints the month for checking, then writes `2025-02.ics` next to the screenshot
@@ -41,17 +43,28 @@ prints the month for checking, then writes `2025-02.ics` next to the screenshot
    `--force`.
 
 The printed table is the review step: compare it with the screenshot before
-importing.
+importing. The model reads 43 rows without blinking; it can still blink.
 
-## Importing
+## Importing into Google Calendar
 
-Importing adds events; it doesn't replace any. Delete the month's old events
-first. Each event has a stable UID (date + flight), so re-importing a corrected
-month updates the same events.
+The Google Calendar phone app can't import an `.ics`, and tapping one on an
+iPhone hands it to Apple Calendar instead, which is how a month of flights ends
+up in the wrong calendar. Import it on the web: Settings › **Import & export** ›
+Import, choose the `.ics`, pick the calendar it belongs in, Import.
+
+Import each month once. Importing adds and never replaces: a month imported
+twice, or on top of events made some other way, shows up twice.
+
+To paste the `.ics` somewhere instead of saving a file, send it to stdout (the
+review table moves to stderr):
+
+```
+uv run ana2ics.py schedule.png -o - | pbcopy
+```
 
 ## Setup
 
-- An Anthropic API key in `ANTHROPIC_API_KEY` or `~/.config/roster-ics/api_key`.
+- An Anthropic API key in `ANTHROPIC_API_KEY` or `~/.config/ana2ics/api_key`.
 - [uv](https://docs.astral.sh/uv/) installs the dependencies (`anthropic`,
   `pillow`) on first run.
 - Tests (no API calls, made-up data): `uv run --with pillow --with anthropic python -m unittest`

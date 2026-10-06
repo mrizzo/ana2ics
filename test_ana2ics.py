@@ -1,12 +1,12 @@
-"""Tests for the conversion half of roster-ics (no API calls). Run: python3 -m unittest"""
+"""Tests for the conversion half of ana2ics (no API calls). Run: python3 -m unittest"""
 import datetime as dt
 import importlib.util
 import unittest
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("roster_ics", Path(__file__).with_name("roster-ics.py"))
-rics = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(rics)
+spec = importlib.util.spec_from_file_location("ana2ics", Path(__file__).with_name("ana2ics.py"))
+ana = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ana)
 
 KEYS = "date weekday on job pos shp conf dep_airport arr_airport start end off sty".split()
 
@@ -35,13 +35,13 @@ FEB = "\n".join([
 
 class ConvertTest(unittest.TestCase):
     def setUp(self):
-        (self.year, self.month), self.evs, self.problems = rics.convert(roster(FEB))
+        (self.year, self.month), self.evs, self.problems = ana.convert(roster(FEB))
 
     def find(self, summary):
         return next(e for e in self.evs if e["summary"] == summary)
 
     def jst(self, ev):
-        s, e = ev["start"].astimezone(rics.JST), ev["end"].astimezone(rics.JST)
+        s, e = ev["start"].astimezone(ana.JST), ev["end"].astimezone(ana.JST)
         return f"{s:%m/%d %H:%M}-{e:%H:%M}"
 
     def test_clean_month_has_no_problems(self):
@@ -71,13 +71,13 @@ class ConvertTest(unittest.TestCase):
 
     def test_overnight_stay(self):
         self.assertEqual(self.find("NH 739 ITM-SDJ")["stay"], "SDJ")
-        self.assertIn("stay SDJ", rics.describe(self.find("NH 739 ITM-SDJ")))
+        self.assertIn("stay SDJ", ana.describe(self.find("NH 739 ITM-SDJ")))
 
     def test_ics_is_valid_and_stable(self):
-        text = rics.to_ics(self.evs, self.year, self.month)
+        text = ana.to_ics(self.evs, self.year, self.month)
         self.assertTrue(text.startswith("BEGIN:VCALENDAR\r\n"))
         self.assertEqual(text.count("BEGIN:VEVENT"), len(self.evs))
-        self.assertIn("UID:20250201-nh-21-itm-hnd@roster-ics", text)
+        self.assertIn("UID:20250201-nh-21-itm-hnd@ana2ics", text)
         self.assertIn("DTEND:20250202T073000Z", text)  # NH 975 lands 16:30 JST
         self.assertIn("DTSTART;VALUE=DATE:20250204", text)
         self.assertTrue(all(len(l.encode()) <= 75 for l in text.split("\r\n")))
@@ -85,7 +85,7 @@ class ConvertTest(unittest.TestCase):
 
 class ProblemsTest(unittest.TestCase):
     def problems(self, text):
-        return rics.convert(roster(text))[2]
+        return ana.convert(roster(text))[2]
 
     def test_missing_days_are_reported(self):
         p = self.problems(FEB.replace("02/05|WE||HOL1||||OSA|||||\n", ""))
@@ -107,7 +107,7 @@ class ProblemsTest(unittest.TestCase):
 class FoldTest(unittest.TestCase):
     def test_fold_keeps_utf8_whole(self):
         line = "DESCRIPTION:" + "日本語" * 20
-        folded = rics.fold(line)
+        folded = ana.fold(line)
         self.assertEqual(folded.replace("\r\n ", ""), line)
         self.assertTrue(all(len(p.encode()) <= 75 for p in folded.split("\r\n")))
 
