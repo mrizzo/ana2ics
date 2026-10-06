@@ -1,0 +1,8 @@
+# rosters are someone's work schedule: never commit them
+*.png
+*.jpg
+*.jpeg
+*.heic
+*.json
+*.ics
+__pycache__/
