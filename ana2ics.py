@@ -52,22 +52,47 @@ API_KEY_FILE = Path("~/.config/ana2ics/api_key").expanduser()
 CODES_FILE = Path("~/.config/ana2ics/codes.tsv").expanduser()
 MODEL = "claude-opus-5-5"
 
-# Airports whose "L" (local) times aren't Japan time. Japanese airports need no entry.
+# Airports: the name for descriptions, and the time zone for "L" (local) times.
 # "L" is one letter, easy to miss. Miss it and the Shanghai leg gets an hour shorter:
 # great for the airline, bad for physics, and a calendar that says she's home early.
-LOCAL_TZ = {
-    "PVG": "Asia/Shanghai", "SHA": "Asia/Shanghai", "PEK": "Asia/Shanghai", "PKX": "Asia/Shanghai",
-    "CAN": "Asia/Shanghai", "DLC": "Asia/Shanghai", "TAO": "Asia/Shanghai", "SZX": "Asia/Shanghai",
-    "HKG": "Asia/Hong_Kong", "TPE": "Asia/Taipei", "TSA": "Asia/Taipei", "ICN": "Asia/Seoul",
-    "GMP": "Asia/Seoul", "MNL": "Asia/Manila", "BKK": "Asia/Bangkok", "SGN": "Asia/Ho_Chi_Minh",
-    "HAN": "Asia/Bangkok", "SIN": "Asia/Singapore", "KUL": "Asia/Kuala_Lumpur", "CGK": "Asia/Jakarta",
-    "HNL": "Pacific/Honolulu",
+_J = "Asia/Tokyo"
+AIRPORTS = {
+    # Japan
+    "ITM": ("Itami", _J), "KIX": ("Kansai", _J), "UKB": ("Kobe", _J), "HND": ("Haneda", _J),
+    "NRT": ("Narita", _J), "CTS": ("Sapporo", _J), "OKA": ("Okinawa", _J), "SDJ": ("Sendai", _J),
+    "FUK": ("Fukuoka", _J), "NGO": ("Nagoya", _J), "HKD": ("Hakodate", _J), "KMQ": ("Komatsu", _J),
+    "HIJ": ("Hiroshima", _J), "KOJ": ("Kagoshima", _J), "KMJ": ("Kumamoto", _J), "OIT": ("Oita", _J),
+    "MYJ": ("Matsuyama", _J), "TAK": ("Takamatsu", _J), "KCZ": ("Kochi", _J), "TOY": ("Toyama", _J),
+    "AOJ": ("Aomori", _J), "AXT": ("Akita", _J), "AKJ": ("Asahikawa", _J), "MMB": ("Memanbetsu", _J),
+    "KUH": ("Kushiro", _J), "OBO": ("Obihiro", _J), "ISG": ("Ishigaki", _J), "MMY": ("Miyako", _J),
+    "NGS": ("Nagasaki", _J), "KMI": ("Miyazaki", _J), "UBJ": ("Yamaguchi Ube", _J),
+    "TKS": ("Tokushima", _J), "IZO": ("Izumo", _J), "YGJ": ("Yonago", _J), "OKJ": ("Okayama", _J),
+    "FSZ": ("Shizuoka", _J), "NTQ": ("Noto", _J), "HSG": ("Saga", _J), "SHM": ("Nanki-Shirahama", _J),
+    # Asia
+    "PVG": ("Shanghai Pudong", "Asia/Shanghai"), "SHA": ("Shanghai Hongqiao", "Asia/Shanghai"),
+    "PEK": ("Beijing", "Asia/Shanghai"), "PKX": ("Beijing Daxing", "Asia/Shanghai"),
+    "CAN": ("Guangzhou", "Asia/Shanghai"), "DLC": ("Dalian", "Asia/Shanghai"),
+    "TAO": ("Qingdao", "Asia/Shanghai"), "SZX": ("Shenzhen", "Asia/Shanghai"),
+    "HKG": ("Hong Kong", "Asia/Hong_Kong"), "TPE": ("Taipei Taoyuan", "Asia/Taipei"),
+    "TSA": ("Taipei Songshan", "Asia/Taipei"), "ICN": ("Seoul Incheon", "Asia/Seoul"),
+    "GMP": ("Seoul Gimpo", "Asia/Seoul"), "MNL": ("Manila", "Asia/Manila"),
+    "BKK": ("Bangkok", "Asia/Bangkok"), "SGN": ("Ho Chi Minh City", "Asia/Ho_Chi_Minh"),
+    "HAN": ("Hanoi", "Asia/Ho_Chi_Minh"), "SIN": ("Singapore", "Asia/Singapore"),
+    "KUL": ("Kuala Lumpur", "Asia/Kuala_Lumpur"), "CGK": ("Jakarta", "Asia/Jakarta"),
+    "DEL": ("Delhi", "Asia/Kolkata"), "BOM": ("Mumbai", "Asia/Kolkata"),
+    # further
+    "HNL": ("Honolulu", "Pacific/Honolulu"), "SYD": ("Sydney", "Australia/Sydney"),
+    "LAX": ("Los Angeles", "America/Los_Angeles"), "SFO": ("San Francisco", "America/Los_Angeles"),
+    "SEA": ("Seattle", "America/Los_Angeles"), "YVR": ("Vancouver", "America/Vancouver"),
+    "JFK": ("New York JFK", "America/New_York"), "ORD": ("Chicago", "America/Chicago"),
+    "IAD": ("Washington Dulles", "America/New_York"), "LHR": ("London Heathrow", "Europe/London"),
+    "FRA": ("Frankfurt", "Europe/Berlin"), "MUC": ("Munich", "Europe/Berlin"),
+    "CDG": ("Paris", "Europe/Paris"),
 }
-JAPAN = {
-    "ITM", "KIX", "UKB", "HND", "NRT", "CTS", "OKA", "SDJ", "FUK", "NGO", "HKD", "KMQ", "HIJ",
-    "KOJ", "KMJ", "OIT", "MYJ", "TAK", "KCZ", "TOY", "AOJ", "AXT", "AKJ", "MMB", "KUH", "OBO",
-    "ISG", "MMY", "NGS", "KMI", "UBJ", "TKS", "IZO", "YGJ", "OKJ", "FSZ", "NTQ", "HSG", "SHM",
-}
+# crew bases, as printed in FROM on ground duties and days off
+BASES = {"OSA": "Osaka", "TYO": "Tokyo"}
+ROW_FIELDS = ("date", "weekday", "on", "job", "pos", "shp", "conf", "dep_airport", "arr_airport",
+              "start", "end", "day", "off", "sty")
 FLIGHT_RE = re.compile(r"^([A-Z]{2})\s*(\d{1,4})$")
 OFF_RE = re.compile(r"^(OFF|HOL)\d*$")
 TIME_RE = re.compile(r"^(\d{2})(\d{2})\s*(L?)$")
@@ -80,7 +105,8 @@ Transcribe it. Return the month exactly as printed in the header (e.g. "2026/10"
 every row of the table, top to bottom, one entry per printed row, including rows that \
 continue the day above (their DATE is blank) and days off. Copy each cell exactly as \
 printed: keep spacing inside a cell like "NH 34" or "NH1273", keep an "L" printed \
-right after a time as part of that time ("1720 L"), and use "" for an empty cell. \
+right after a time as part of that time ("1720 L", also in ON, DAY and OFF), and use "" \
+for an empty cell. \
 Don't interpret, correct, convert or skip anything. Read flight numbers and times \
 digit by digit: a wrong digit puts someone on the wrong flight."""
 
@@ -90,7 +116,7 @@ def schema():
 
     class Row(BaseModel):
         date: str = Field(description='DATE as printed, e.g. "10/01"; "" on a continuation row')
-        weekday: str = Field(description='the letters after the date, e.g. "TH A", "FR a", "SA"')
+        weekday: str = Field(description='everything printed between DATE and ON, e.g. "TH A", "SU L", "L TU"')
         on: str = Field(description="ON (report time)")
         job: str = Field(description='JOB, e.g. "NH 34", "NH1273", "OFF1", "HOL1", "G1", "GRT"')
         pos: str = Field(description='the column between JOB and SHP, e.g. "CP", "GRF"')
@@ -100,6 +126,7 @@ def schema():
         arr_airport: str = Field(description="TO")
         start: str = Field(description='first TIME, with a trailing "L" if printed')
         end: str = Field(description='second TIME, with a trailing "L" if printed')
+        day: str = Field(description='DAY, e.g. "12 L"; usually empty')
         off: str = Field(description="OFF")
         sty: str = Field(description="STY")
 
@@ -189,10 +216,10 @@ def clock(text, day, airport, problems, where):
         return None
     tz = JST
     if local:
-        if airport in LOCAL_TZ:
-            tz = ZoneInfo(LOCAL_TZ[airport])
-        elif airport not in JAPAN:
-            problems.add(where, f"local time at {airport!r}, whose time zone isn't known; add it to LOCAL_TZ")
+        if airport in AIRPORTS:
+            tz = ZoneInfo(AIRPORTS[airport][1])
+        else:
+            problems.add(where, f"local time at {airport!r}, whose time zone isn't known; add it to AIRPORTS")
             return None
     return dt.datetime.combine(day, dt.time(hh, mm), tz)
 
@@ -206,7 +233,13 @@ def duties(roster, problems):
     year, month = int(m[1]), int(m[2])
     days, current = [], None
     for i, row in enumerate(roster["rows"], 1):
-        row = {k: " ".join(str(v).split()) for k, v in row.items()}
+        # every column as a single-spaced string; transcriptions from before a column was
+        # added (DAY) just have it empty
+        row = {k: " ".join(str(row.get(k, "")).split()) for k in ROW_FIELDS}
+        # the STY cell sometimes rides along in OFF ("2220 m", "2130 SDJ"); split it back out
+        m_off = re.match(r"^(\d{4}(?: L)?) (\S+)$", row["off"])
+        if m_off and not row["sty"] and m_off[2] != "L":
+            row["off"], row["sty"] = m_off[1], m_off[2]
         if row["date"]:
             dm = re.match(r"^(\d{1,2})/(\d{1,2})$", row["date"])
             if not dm or int(dm[1]) != month:
@@ -240,7 +273,7 @@ def flight_name(job):
 
 def events(days, problems):
     """Calendar events from the grouped days: dicts with kind, summary, start, end, ..."""
-    out, off_run = [], None
+    out, off_run, last_leg = [], None, None
 
     def close_off_run():
         # Days off: the only events nobody minds being all day.
@@ -274,7 +307,7 @@ def events(days, problems):
         report = rows[0]["on"]
         first_is_flight = bool(flight_name(rows[0]["job"]) and rows[0]["dep_airport"] and rows[0]["arr_airport"])
         release = next((r["off"] for r in reversed(rows) if r["off"]), "")
-        stay = next((r["sty"] for r in reversed(rows) if r["sty"] in JAPAN or r["sty"] in LOCAL_TZ), "")
+        stay = next((r["sty"] for r in reversed(rows) if r["sty"] in AIRPORTS), "")
         ground = []
         prev_end = None
         legs = []
@@ -294,10 +327,13 @@ def events(days, problems):
                 if not 20 <= minutes <= 14 * 60:
                     problems.add(f"{where} {name}", f"{minutes:.0f} minutes from departure to arrival")
                 prev_end = end
+                deadhead = row["pos"] == "DH"  # riding as a passenger to or from a trip
                 legs.append({
                     "kind": "flight", "summary": f"{name} {row['dep_airport']}-{row['arr_airport']}",
-                    "start": start, "end": end, "aircraft": row["shp"], "pos": row["pos"],
-                    "codes": [c for c in (row["shp"], row["pos"]) if c],
+                    "start": start, "end": end, "aircraft": row["shp"], "pos": "" if deadhead else row["pos"],
+                    "deadhead": deadhead, "day": row["day"],
+                    "codes": [c for c in (row["shp"], "" if deadhead else row["pos"]) if c],
+                    "from": row["dep_airport"], "to": row["arr_airport"],
                 })
             elif row["start"] and row["end"] and not row["job"]:
                 problems.add(where, f"times {row['start']}-{row['end']} with no job; left out")
@@ -305,7 +341,13 @@ def events(days, problems):
                 start = clock(row["start"], day, "", problems, f"{where} {row['job']}")
                 end = clock(row["end"], day, "", problems, f"{where} {row['job']}")
                 if start and end:
-                    ground.append((row["job"], start, end, row["dep_airport"]))
+                    # a ground duty can carry a second code in the column after JOB ("EMG PTE")
+                    label = f"{row['job']} {row['pos']}" if row["pos"] else row["job"]
+                    ground.append((label, start, end, row["dep_airport"], [row["job"], row["pos"]]))
+            elif row["job"] == "CONT":
+                # the trip continues from the day before; its OFF is when that trip ends
+                if last_leg and row["off"] and not last_leg.get("release"):
+                    last_leg["release"] = row["off"]
             elif row["job"]:
                 problems.add(f"{where} {row['job']}", "no times and not a day off; left out")
         if legs:
@@ -313,25 +355,40 @@ def events(days, problems):
                 legs[0]["report"] = report
             legs[-1]["release"] = release
             legs[-1]["stay"] = stay
+            for leg in legs:
+                # the title says what kind of leg it is: worked, deadhead, red-eye, layover after
+                if leg["deadhead"]:
+                    leg["summary"] = f"Deadhead: {leg['summary']}"
+                if leg["end"].astimezone(JST).date() > leg["start"].astimezone(JST).date():
+                    leg["summary"] = f"Overnight: {leg['summary']}"
+                if leg.get("stay"):
+                    leg["summary"] += f" · stay {leg['stay']}"
+            last_leg = legs[-1]
         if ground:
             jobs = " / ".join(dict.fromkeys(g[0] for g in ground))
             out.append({
                 "kind": "duty", "summary": f"Duty {jobs}",
                 "start": min(g[1] for g in ground), "end": max(g[2] for g in ground),
-                "location": ground[0][3],
-                "codes": list(dict.fromkeys(g[0] for g in ground)),
+                "location": BASES.get(ground[0][3]) or airport(ground[0][3]),
+                "codes": list(dict.fromkeys(c for g in ground for c in g[4] if c)),
             })
         out.extend(legs)
-        if not legs and not ground and rows:
+        if not legs and not ground and not any(r["job"] == "CONT" for r in rows):
             problems.add(where, "nothing scheduled and not a day off")
     close_off_run()
-    return out
+    # in time order within each day (a ground duty can come after the day's flights)
+    return sorted(out, key=lambda ev: ev["start"] if ev["kind"] != "off"
+                  else dt.datetime.combine(ev["start"], dt.time(), JST))
 
 
-def describe(ev):
-    if ev["kind"] != "flight":
-        return ev.get("description", "")
-    parts = [f"Aircraft {ev['aircraft']}" if ev["aircraft"] else ""]
+def airport(code):
+    return f"{AIRPORTS[code][0]} ({code})" if code in AIRPORTS else code
+
+
+def details(ev):
+    """A flight's one-line extras: aircraft, unlabeled code, report/off times, stay."""
+    parts = ["Deadhead (riding as a passenger)" if ev.get("deadhead") else ""]
+    parts.append(f"Aircraft {ev['aircraft']}" if ev["aircraft"] else "")
     if ev.get("pos"):
         parts.append(ev["pos"])  # printed in the unlabeled column after JOB; meaning unknown
     if ev.get("report"):
@@ -339,8 +396,17 @@ def describe(ev):
     if ev.get("release"):
         parts.append(f"off {ev['release']}")
     if ev.get("stay"):
-        parts.append(f"stay {ev['stay']}")
+        parts.append(f"stay {airport(ev['stay'])}")
+    if ev.get("day"):
+        parts.append(f"DAY {ev['day']}")  # meaning unknown; printed on long trips
     return ", ".join(p for p in parts if p)
+
+
+def describe(ev):
+    if ev["kind"] != "flight":
+        return ev.get("description", "")
+    route = f"{airport(ev['from'])} → {airport(ev['to'])}"
+    return "\n".join(p for p in (route, details(ev)) if p)
 
 
 def load_codes(path):
@@ -426,7 +492,7 @@ def table(evs):
         else:
             s, e = ev["start"].astimezone(JST), ev["end"].astimezone(JST)
             nextday = "+1" if e.date() > s.date() else ""
-            extra = f"  ({describe(ev)})" if ev["kind"] == "flight" else ""
+            extra = f"  ({details(ev)})" if ev["kind"] == "flight" else ""
             out.append(f"{s:%m/%d}{'':<6} {s:%H:%M}-{e:%H:%M}{nextday:<2} {ev['summary']}{extra}")
     return "\n".join(out)
 

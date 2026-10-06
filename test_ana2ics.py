@@ -25,7 +25,7 @@ FEB = "\n".join([
     "02/02|SU a|1300|NH 975||32E|X|KIX|PVG|1400|1530 L||",
     "|||NH 976||32E|X|PVG|KIX|1630 L|1945|2015|m",
     "02/03|MO A|0900|GRT||||OSA||0900|1600||",
-    "|||WA10||||OSA||1600|1700|1700|A",
+    "|||WA10|PTE|||OSA||1600|1700|1700|A",
     "02/04|TU||OFF1||||OSA|||||",
     "02/05|WE||HOL1||||OSA|||||",
     "02/06|TH||OFF1||||OSA|||||",
@@ -59,8 +59,9 @@ class ConvertTest(unittest.TestCase):
         self.assertEqual(self.jst(self.find("NH 976 PVG-KIX")), "02/02 17:30-19:45")
 
     def test_ground_duties_merge(self):
-        duty = self.find("Duty GRT / WA10")
+        duty = self.find("Duty GRT / WA10 PTE")
         self.assertEqual(self.jst(duty), "02/03 09:00-17:00")
+        self.assertEqual(duty["codes"], ["GRT", "WA10", "PTE"])
 
     def test_days_off_group_and_mark_holidays(self):
         off = [e for e in self.evs if e["kind"] == "off"]
@@ -70,8 +71,8 @@ class ConvertTest(unittest.TestCase):
         ])
 
     def test_overnight_stay(self):
-        self.assertEqual(self.find("NH 739 ITM-SDJ")["stay"], "SDJ")
-        self.assertIn("stay SDJ", ana.describe(self.find("NH 739 ITM-SDJ")))
+        self.assertEqual(self.find("NH 739 ITM-SDJ · stay SDJ")["stay"], "SDJ")
+        self.assertIn("stay Sendai (SDJ)", ana.describe(self.find("NH 739 ITM-SDJ · stay SDJ")))
 
     def test_ics_is_valid_and_stable(self):
         text = ana.to_ics(self.evs, self.year, self.month)
@@ -81,6 +82,51 @@ class ConvertTest(unittest.TestCase):
         self.assertIn("DTEND:20250202T073000Z", text)  # NH 975 lands 16:30 JST
         self.assertIn("DTSTART;VALUE=DATE:20250204", text)
         self.assertTrue(all(len(l.encode()) <= 75 for l in text.split("\r\n")))
+
+
+# March 2025, made up: out to Jakarta with local times, a red-eye back, a deadhead home
+# the next morning, then a CONT day that only carries the trip's OFF time.
+TRIP = [
+    {"date": "03/01", "weekday": "SA L", "on": "0845", "job": "NH 855", "shp": "78I",
+     "dep_airport": "HND", "arr_airport": "CGK", "start": "1015", "end": "1615 L", "day": "12 L",
+     "off": "1700 L", "sty": "CGK"},
+    {"date": "03/02", "weekday": "L SU", "on": "2030 L", "job": "NH 856", "shp": "78I",
+     "dep_airport": "CGK", "arr_airport": "HND", "start": "2145 L", "end": "0650"},
+    {"job": "NH 17", "pos": "DH", "shp": "77E", "dep_airport": "HND", "arr_airport": "ITM",
+     "start": "0900", "end": "1010"},
+    {"date": "03/03", "weekday": "MO", "job": "CONT", "off": "1010", "sty": "A"},
+] + [{"date": f"03/{d:02d}", "weekday": "XX", "job": "OFF1", "dep_airport": "OSA"} for d in range(4, 32)]
+
+
+class TripTest(unittest.TestCase):
+    def setUp(self):
+        (_, _), self.evs, self.problems = ana.convert({"month": "2025/03", "rows": TRIP})
+        self.legs = {e["summary"]: e for e in self.evs if e["kind"] == "flight"}
+
+    def jst(self, ev):
+        s, e = ev["start"].astimezone(ana.JST), ev["end"].astimezone(ana.JST)
+        return f"{s:%m/%d %H:%M}-{e:%m/%d %H:%M}"
+
+    def test_no_problems_with_cont(self):
+        self.assertEqual(self.problems, [])
+
+    def test_titles(self):
+        self.assertEqual(sorted(self.legs), [
+            "Deadhead: NH 17 HND-ITM", "NH 855 HND-CGK · stay CGK", "Overnight: NH 856 CGK-HND"])
+
+    def test_jakarta_times(self):
+        # Jakarta is UTC+7, two hours behind Japan
+        self.assertEqual(self.jst(self.legs["NH 855 HND-CGK · stay CGK"]), "03/01 10:15-03/01 18:15")
+        self.assertEqual(self.jst(self.legs["Overnight: NH 856 CGK-HND"]), "03/02 23:45-03/03 06:50")
+        # listed under 03/02, but it departs after the red-eye lands
+        self.assertEqual(self.jst(self.legs["Deadhead: NH 17 HND-ITM"]), "03/03 09:00-03/03 10:10")
+
+    def test_deadhead_and_cont_details(self):
+        dh = self.legs["Deadhead: NH 17 HND-ITM"]
+        self.assertTrue(ana.describe(dh).startswith("Haneda (HND) → Itami (ITM)\nDeadhead"))
+        self.assertEqual(dh["release"], "1010")  # from the CONT day
+        self.assertNotIn("DH", ana.unknown_codes(self.evs, {}))
+        self.assertIn("DAY 12 L", ana.describe(self.legs["NH 855 HND-CGK · stay CGK"]))
 
 
 class ProblemsTest(unittest.TestCase):
@@ -125,12 +171,12 @@ class CodesTest(unittest.TestCase):
         duty = next(e for e in self.evs if e["kind"] == "duty")
         self.assertEqual(ana.full_description(duty, self.codes), "GRT: ground thing")
         leg = next(e for e in self.evs if e["summary"] == "NH 21 ITM-HND")
-        self.assertEqual(ana.full_description(leg, self.codes), "Aircraft 789, report 0800\n\n789: Big plane")
+        self.assertEqual(ana.full_description(leg, self.codes), "Itami (ITM) → Haneda (HND)\nAircraft 789, report 0800\n\n789: Big plane")
         ics = ana.to_ics(self.evs, 2025, 2, self.codes).replace("\r\n ", "")
-        self.assertIn("DESCRIPTION:Aircraft 789\\, report 0800\\n\\n789: Big plane", ics)
+        self.assertIn("DESCRIPTION:Itami (ITM) → Haneda (HND)\\nAircraft 789\\, report 0800\\n\\n789: Big plane", ics)
 
     def test_unknown_codes_are_listed(self):
-        self.assertEqual(ana.unknown_codes(self.evs, self.codes), ["32E", "32N", "CP", "HOL1", "WA10"])
+        self.assertEqual(ana.unknown_codes(self.evs, self.codes), ["32E", "32N", "CP", "HOL1", "PTE", "WA10"])
 
 
 class FoldTest(unittest.TestCase):
