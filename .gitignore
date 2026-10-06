@@ -6,3 +6,4 @@
 *.json
 *.ics
 __pycache__/
+*.tsv
