@@ -28,7 +28,11 @@ prints the month for checking, then writes `2025-02.ics` next to the screenshot
    as printed, as structured JSON, saved next to the screenshot. No dates,
    time zones or calendar logic are left to the model.
 2. **Python does everything that has to be exact:**
-   - one event per flight, in Japan time;
+   - one event per flight, in Japan time, titled by what kind of leg it is:
+     `NH 34 ITM-HND`, `Deadhead: NH 17 HND-ITM` (`DH` in the column after JOB),
+     `Overnight: NH 856 CGK-HND` (lands after midnight), and
+     `NH 739 ITM-SDJ · stay SDJ` before a layover;
+   - a trip that runs into the next day (`CONT`) gets its OFF time from that day;
    - `1720 L` means local time at that airport (e.g. Shanghai, UTC+8) and is
      converted;
    - a leg that lands after midnight ends the next day;
@@ -93,8 +97,16 @@ After each run, ana2ics lists the codes that don't have a meaning yet. Look one
 up once, add it, and you never look it up again. Keep the file out of the repo:
 it's ANA's internal vocabulary.
 
-A local (`L`) time at an airport missing from `LOCAL_TZ` in the script stops the
-run: add the airport and its time zone there.
+Flights get the airport names too:
+
+```
+NH 771 ITM-CTS
+Itami (ITM) → Sapporo (CTS)
+Aircraft 789, report 0730
+```
+
+A local (`L`) time at an airport missing from `AIRPORTS` in the script stops the
+run: add the airport's name and time zone there.
 
 ## Privacy
 
