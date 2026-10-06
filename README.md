@@ -49,9 +49,12 @@ prints the month for checking, then writes `2025-02.ics` next to the screenshot
 The printed table is the review step: compare it with the screenshot before
 importing. The model reads 43 rows without blinking; it can still blink.
 
-## Importing into Google Calendar
+## Importing
 
-The Google Calendar phone app can't import an `.ics`, and tapping one on an
+An `.ics` is the standard calendar file: Apple Calendar, Outlook and Google
+Calendar all import it. Apple Calendar and Outlook open the file directly.
+
+**Google Calendar:** the phone app can't import an `.ics`, and tapping one on an
 iPhone hands it to Apple Calendar instead, which is how a month of flights ends
 up in the wrong calendar. Import it on the web: Settings › **Import & export** ›
 Import, choose the `.ics`, pick the calendar it belongs in, Import.
