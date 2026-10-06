@@ -104,6 +104,35 @@ class ProblemsTest(unittest.TestCase):
         self.assertTrue(any("minutes from departure" in x for x in p))
 
 
+class CodesTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.dir.name) / "codes.tsv"
+        # made-up meanings; tab and two-space separators, a comment, a code with no meaning yet
+        self.path.write_text("# my codes\nGRT\tground thing\nOFF1  day off\n789\tBig plane\nWA10\t\n\n")
+        (_, _), self.evs, _ = ana.convert(roster(FEB))
+        self.codes = ana.load_codes(self.path)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_load_codes(self):
+        self.assertEqual(self.codes, {"GRT": "ground thing", "OFF1": "day off", "789": "Big plane"})
+        self.assertEqual(ana.load_codes(Path(self.dir.name) / "missing.tsv"), {})
+
+    def test_descriptions_spell_codes_out(self):
+        duty = next(e for e in self.evs if e["kind"] == "duty")
+        self.assertEqual(ana.full_description(duty, self.codes), "GRT: ground thing")
+        leg = next(e for e in self.evs if e["summary"] == "NH 21 ITM-HND")
+        self.assertEqual(ana.full_description(leg, self.codes), "Aircraft 789, report 0800\n\n789: Big plane")
+        ics = ana.to_ics(self.evs, 2025, 2, self.codes).replace("\r\n ", "")
+        self.assertIn("DESCRIPTION:Aircraft 789\\, report 0800\\n\\n789: Big plane", ics)
+
+    def test_unknown_codes_are_listed(self):
+        self.assertEqual(ana.unknown_codes(self.evs, self.codes), ["32E", "32N", "CP", "HOL1", "WA10"])
+
+
 class FoldTest(unittest.TestCase):
     def test_fold_keeps_utf8_whole(self):
         line = "DESCRIPTION:" + "日本語" * 20

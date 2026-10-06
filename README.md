@@ -69,14 +69,34 @@ uv run ana2ics.py schedule.png -o - | pbcopy
   `pillow`) on first run.
 - Tests (no API calls, made-up data): `uv run --with pillow --with anthropic python -m unittest`
 
-## Unknown codes
+## Codes
 
-`CP`, `GRF` (the unlabeled column after JOB) and the letters after the weekday
-are copied into the description as printed, not interpreted. A local (`L`)
-time at an airport missing from `LOCAL_TZ` in the script stops the run: add the
-airport and its time zone there.
+ANA doesn't publish what its duty, leave, aircraft and position codes mean
+(`GRT`, `WA10`, `OFF3`, `CP`, `78T`...), so ana2ics reads them from a file you
+keep yourself, `~/.config/ana2ics/codes.tsv` (or `--codes FILE`): one code per
+line, a tab (or two spaces), then what it means. Made-up example:
+
+```
+# my codes
+GRT	ground training
+OFF1	day off
+```
+
+Every calendar entry then spells out its codes in the description:
+
+```
+Duty GRT / WA10
+GRT: ground training
+```
+
+After each run, ana2ics lists the codes that don't have a meaning yet. Look one
+up once, add it, and you never look it up again. Keep the file out of the repo:
+it's ANA's internal vocabulary.
+
+A local (`L`) time at an airport missing from `LOCAL_TZ` in the script stops the
+run: add the airport and its time zone there.
 
 ## Privacy
 
 Screenshots, transcriptions (`.json`) and `.ics` files hold someone's work
-schedule. They're git-ignored; keep them out of the repo.
+schedule, and the codes file holds ANA's internal vocabulary. They're git-ignored; keep them out of the repo.

@@ -47,6 +47,9 @@ from zoneinfo import ZoneInfo
 
 JST = ZoneInfo("Asia/Tokyo")
 API_KEY_FILE = Path("~/.config/ana2ics/api_key").expanduser()
+# What the duty, leave, aircraft and position codes mean. ANA doesn't publish them, so
+# this file is yours: one "CODE<tab>meaning" per line, filled in as you look them up.
+CODES_FILE = Path("~/.config/ana2ics/codes.tsv").expanduser()
 MODEL = "claude-opus-5-5"
 
 # Airports whose "L" (local) times aren't Japan time. Japanese airports need no entry.
@@ -249,6 +252,7 @@ def events(days, problems):
                 "kind": "off", "summary": f"{kind} ({off_run['base']})" if off_run["base"] else kind,
                 "start": off_run["first"], "end": off_run["last"] + dt.timedelta(days=1),
                 "description": ", ".join(f"{d:%m/%d} {c}" for d, c in zip(off_run["dates"], codes)),
+                "codes": list(dict.fromkeys(codes)),
             })
         off_run = None
 
@@ -293,6 +297,7 @@ def events(days, problems):
                 legs.append({
                     "kind": "flight", "summary": f"{name} {row['dep_airport']}-{row['arr_airport']}",
                     "start": start, "end": end, "aircraft": row["shp"], "pos": row["pos"],
+                    "codes": [c for c in (row["shp"], row["pos"]) if c],
                 })
             elif row["start"] and row["end"] and not row["job"]:
                 problems.add(where, f"times {row['start']}-{row['end']} with no job; left out")
@@ -314,6 +319,7 @@ def events(days, problems):
                 "kind": "duty", "summary": f"Duty {jobs}",
                 "start": min(g[1] for g in ground), "end": max(g[2] for g in ground),
                 "location": ground[0][3],
+                "codes": list(dict.fromkeys(g[0] for g in ground)),
             })
         out.extend(legs)
         if not legs and not ground and rows:
@@ -337,6 +343,33 @@ def describe(ev):
     return ", ".join(p for p in parts if p)
 
 
+def load_codes(path):
+    """{code: meaning} from a codes file; a code with no meaning yet isn't included."""
+    codes = {}
+    if path and path.exists():
+        for line in path.read_text().splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            # a tab between code and meaning, or two or more spaces (editors turn tabs into spaces)
+            code, *meaning = re.split(r"\t+| {2,}", line.strip(), maxsplit=1)
+            if meaning and meaning[0].strip():
+                codes[code] = meaning[0].strip()
+    return codes
+
+
+def glossary(ev, codes):
+    """The event's codes spelled out, one per line, for the ones the codes file knows."""
+    return "\n".join(f"{c}: {codes[c]}" for c in ev.get("codes", []) if c in codes)
+
+
+def unknown_codes(evs, codes):
+    return sorted({c for ev in evs for c in ev.get("codes", []) if c not in codes})
+
+
+def full_description(ev, codes):
+    return "\n\n".join(p for p in (describe(ev), glossary(ev, codes)) if p)
+
+
 def ics_text(value):
     return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
@@ -357,7 +390,7 @@ def fold(line):
     return "\r\n ".join(out)
 
 
-def to_ics(evs, year, month):
+def to_ics(evs, year, month, codes=None):
     utc = lambda t: t.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
@@ -373,8 +406,9 @@ def to_ics(evs, year, month):
             key = f"{ev['start'].astimezone(JST):%Y%m%d}-{re.sub(r'[^A-Za-z0-9]+', '-', ev['summary']).strip('-').lower()}"
         lines += ["BEGIN:VEVENT", f"UID:{key}@ana2ics", f"DTSTAMP:{stamp}", *when,
                   f"SUMMARY:{ics_text(ev['summary'])}"]
-        if describe(ev):
-            lines.append(f"DESCRIPTION:{ics_text(describe(ev))}")
+        text = full_description(ev, codes or {})
+        if text:
+            lines.append(f"DESCRIPTION:{ics_text(text)}")
         if ev.get("location"):
             lines.append(f"LOCATION:{ics_text(ev['location'])}")
         lines += ["TRANSP:OPAQUE", "END:VEVENT"]
@@ -412,6 +446,7 @@ def main():
     parser.add_argument("-o", "--output", type=Path, help="default: YYYY-MM.ics next to the input; - for stdout")
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--force", action="store_true", help="write the .ics even if checks fail")
+    parser.add_argument("--codes", type=Path, default=CODES_FILE, help=f"code meanings, default {CODES_FILE}")
     args = parser.parse_args()
     if bool(args.screenshot) == bool(args.from_json):
         parser.error("give a screenshot or --from-json, not both")
@@ -426,6 +461,7 @@ def main():
         print(f"saved the transcription to {source}", file=sys.stderr)
 
     (year, month), evs, problems = convert(roster)
+    codes = load_codes(args.codes)
     to_stdout = str(args.output) == "-"
     print(table(evs), file=sys.stderr if to_stdout else sys.stdout)
     if problems:
@@ -436,12 +472,17 @@ def main():
                   "--from-json (no API call, no monkeys), or --force.", file=sys.stderr)
             return 1
     if to_stdout:
-        sys.stdout.write(to_ics(evs, year, month))
+        sys.stdout.write(to_ics(evs, year, month, codes))
         sys.stdout.flush()
         out = "stdout"
     else:
         out = args.output or source.with_name(f"{year:04d}-{month:02d}.ics")
-        out.write_text(to_ics(evs, year, month), newline="")
+        out.write_text(to_ics(evs, year, month, codes), newline="")
+    unknown = unknown_codes(evs, codes)
+    if unknown:
+        print(f"\nCodes with no meaning in {args.codes} yet: {', '.join(unknown)}\n"
+              "Look each one up once, add a line (CODE<tab>meaning), and every calendar entry\n"
+              "spells it out from then on.", file=sys.stderr)
     print(f"\nwrote {len(evs)} events to {out}.\n"
           "Processing done. In 2006 this took 30 minutes. Still, check it against the screenshot\n"
           "before importing: you are the last line of quality assurance.", file=sys.stderr)
