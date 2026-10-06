@@ -280,9 +280,13 @@ def events(days, problems):
         nonlocal off_run
         if off_run:
             codes = off_run["codes"]
-            kind = "OFF/HOL" if any(c.startswith("HOL") for c in codes) else "OFF"
+            if off_run["family"] == "off":
+                kind = "OFF/HOL" if any(c.startswith("HOL") for c in codes) else "OFF"
+            else:
+                kind = off_run["family"]  # another all-day code, e.g. LO4: named as printed
             out.append({
-                "kind": "off", "summary": f"{kind} ({off_run['base']})" if off_run["base"] else kind,
+                "kind": "off", "family": off_run["family"],
+                "summary": f"{kind} ({off_run['base']})" if off_run["base"] else kind,
                 "start": off_run["first"], "end": off_run["last"] + dt.timedelta(days=1),
                 "description": ", ".join(f"{d:%m/%d} {c}" for d, c in zip(off_run["dates"], codes)),
                 "codes": list(dict.fromkeys(codes)),
@@ -291,15 +295,23 @@ def events(days, problems):
 
     for day, rows in days:
         where = day.strftime("%m/%d")
-        if len(rows) == 1 and OFF_RE.match(rows[0]["job"].replace(" ", "")):
-            code, base = rows[0]["job"].replace(" ", ""), rows[0]["dep_airport"]
-            if off_run and off_run["last"] == day - dt.timedelta(days=1) and off_run["base"] == base:
+        only = rows[0] if len(rows) == 1 else None
+        all_day = only and only["job"] and only["job"] != "CONT" and not (only["start"] or only["end"]) \
+            and not (flight_name(only["job"]) and only["arr_airport"])
+        if all_day:
+            # days off (OFF1, HOL1...) group together; any other all-day code (LO4) groups
+            # with itself
+            code, base = only["job"].replace(" ", ""), only["dep_airport"]
+            family = "off" if OFF_RE.match(code) else code
+            if off_run and off_run["last"] == day - dt.timedelta(days=1) and off_run["base"] == base \
+                    and off_run["family"] == family:
                 off_run.update(last=day)
                 off_run["dates"].append(day)
                 off_run["codes"].append(code)
             else:
                 close_off_run()
-                off_run = {"first": day, "last": day, "base": base, "dates": [day], "codes": [code]}
+                off_run = {"first": day, "last": day, "base": base, "dates": [day], "codes": [code],
+                           "family": family}
             continue
         close_off_run()
 
@@ -466,7 +478,7 @@ def to_ics(evs, year, month, codes=None):
     for ev in evs:
         if ev["kind"] == "off":
             when = [f"DTSTART;VALUE=DATE:{ev['start']:%Y%m%d}", f"DTEND;VALUE=DATE:{ev['end']:%Y%m%d}"]
-            key = f"{ev['start']:%Y%m%d}-off"
+            key = f"{ev['start']:%Y%m%d}-{ev['family'].lower()}"
         else:
             when = [f"DTSTART:{utc(ev['start'])}", f"DTEND:{utc(ev['end'])}"]
             key = f"{ev['start'].astimezone(JST):%Y%m%d}-{re.sub(r'[^A-Za-z0-9]+', '-', ev['summary']).strip('-').lower()}"
